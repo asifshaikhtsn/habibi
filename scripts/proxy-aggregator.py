@@ -428,6 +428,22 @@ async def geolocate_batch(session, ips):
     return result
 
 
+async def scrape_dinoz0rg_checked(session):
+    rows = []
+    base = "https://raw.githubusercontent.com/dinoz0rg/proxy-list/main/checked_proxies"
+    for proto, url in (
+        ("http.txt", "HTTP"),
+        ("socks4.txt", "SOCKS4"),
+        ("socks5.txt", "SOCKS5"),
+    ):
+        txt = await fetch(session, "{}/{}".format(base, proto))
+        for line in txt.splitlines():
+            m = ADDRESS_RE.search(line)
+            if m:
+                rows.append({"address": m.group(1), "protocol": url, "country": ""})
+    return rows
+
+
 SCRAPERS = (
     scrape_geonode,
     scrape_proxyscrape,
@@ -436,6 +452,7 @@ SCRAPERS = (
     scrape_proxydb,
     scrape_spys_one,
     scrape_proxynova,
+    scrape_dinoz0rg_checked,
 )
 
 SOURCE_NAMES = {
@@ -446,6 +463,7 @@ SOURCE_NAMES = {
     scrape_proxydb: "ProxyDB",
     scrape_spys_one: "Spys.one",
     scrape_proxynova: "ProxyNova",
+    scrape_dinoz0rg_checked: "Dinoz0rg Checked Proxies",
 }
 
 
