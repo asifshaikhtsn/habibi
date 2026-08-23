@@ -82,7 +82,7 @@ async def scrape_proxyscrape(session):
     for proto in ("http", "https", "socks4", "socks5"):
         url = (
             "https://api.proxyscrape.com/v2/?request=displayproxies&protocol={}"
-            "&timeout=10000&country=all&ssl=all&anonymity=all".format(proto)
+            "&timeout=15000&country=all&ssl=all&anonymity=all".format(proto)
         )
         text = await fetch(session, url)
         for line in text.splitlines():
@@ -366,13 +366,36 @@ def decode_nova_ips(html):
 async def scrape_proxynova(session):
     rows = []
     seen = set()
+
+    def add_rows(html, default_port):
+        chunks = html.split('<tr data-proxy-id=')[1:]
+        count = 0
+        for chunk in chunks:
+            end = chunk.find("</tr>")
+            block = chunk[: end if end > 0 else len(chunk)]
+            ips = decode_nova_ips(block)
+            if not ips:
+                continue
+            pm = re.search(r'href="/proxy-server-list/port-(\d+)/"', block)
+            prt = pm.group(1) if pm else default_port
+            for ip in ips:
+                addr = "{}:{}".format(ip, prt)
+                if addr not in seen:
+                    seen.add(addr)
+                    rows.append({"address": addr, "protocol": "HTTP", "country": ""})
+                    count += 1
+        return count
+
     for port in ("80", "8080", "3128", "8000", "8888"):
         html = await fetch(session, "https://www.proxynova.com/proxy-server-list/port-{}/".format(port))
-        for ip in decode_nova_ips(html):
-            addr = "{}:{}".format(ip, port)
-            if addr not in seen:
-                seen.add(addr)
-                rows.append({"address": addr, "protocol": "HTTP", "country": ""})
+        add_rows(html, port)
+
+    idx = await fetch(session, "https://www.proxynova.com/proxy-server-list/")
+    country_codes = sorted(set(re.findall(r"proxy-server-list/country-([a-z]{2})/", idx)))
+    for cc in country_codes:
+        html = await fetch(session, "https://www.proxynova.com/proxy-server-list/country-{}/".format(cc))
+        if html:
+            add_rows(html, "")
     return rows
 
 
