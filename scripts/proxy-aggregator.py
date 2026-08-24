@@ -447,17 +447,17 @@ async def scrape_dinoz0rg_checked(session):
 async def scrape_proxripper(session):
     rows = []
     base = "https://raw.githubusercontent.com/Mohammedcha/ProxRipper/main/full_proxies"
-    for proto, url in (
-        ("http.txt", "HTTP"),
-        ("https.txt", "HTTPS"),
-        ("socks4.txt", "SOCKS4"),
-        ("socks5.txt", "SOCKS5"),
-    ):
-        txt = await fetch(session, "{}/{}".format(base, proto))
-        for line in txt.splitlines():
-            m = ADDRESS_RE.search(line)
-            if m:
-                rows.append({"address": m.group(1), "protocol": url, "country": ""})
+    # Only HTTP, capped at 50k to keep geolocation under timeout
+    proto, url = ("http.txt", "HTTP")
+    txt = await fetch(session, "{}/{}".format(base, proto))
+    count = 0
+    for line in txt.splitlines():
+        m = ADDRESS_RE.search(line)
+        if m:
+            rows.append({"address": m.group(1), "protocol": url, "country": ""})
+            count += 1
+            if count >= 50000:
+                break
     return rows
 
 
