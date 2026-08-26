@@ -477,6 +477,22 @@ async def scrape_dpangestuw(session):
     return rows
 
 
+async def scrape_aliilapro(session):
+    rows = []
+    base = "https://raw.githubusercontent.com/ALIILAPRO/Proxy/main"
+    for proto, url in (
+        ("http.txt", "HTTP"),
+        ("socks4.txt", "SOCKS4"),
+        ("socks5.txt", "SOCKS5"),
+    ):
+        txt = await fetch(session, "{}/{}".format(base, proto))
+        for line in txt.splitlines():
+            m = ADDRESS_RE.search(line)
+            if m:
+                rows.append({"address": m.group(1), "protocol": url, "country": ""})
+    return rows
+
+
 async def scrape_thespeedx(session):
     rows = []
     base = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master"
@@ -504,6 +520,7 @@ SCRAPERS = (
     scrape_dinoz0rg_checked,
     scrape_noctiro,
     scrape_dpangestuw,
+    scrape_aliilapro,
     scrape_thespeedx,
 )
 
@@ -518,6 +535,7 @@ SOURCE_NAMES = {
     scrape_dinoz0rg_checked: "Dinoz0rg Checked Proxies",
     scrape_noctiro: "noctiro/getproxy",
     scrape_dpangestuw: "dpangestuw Free-Proxy",
+    scrape_aliilapro: "ALIILAPRO/Proxy",
     scrape_thespeedx: "TheSpeedX/PROXY-List",
 }
 
