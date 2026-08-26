@@ -249,37 +249,6 @@ def decode_spys_ports(html):
     return results
 
 
-async def scrape_spys_one(session):
-    rows = []
-    for url, is_socks in (
-        ("https://spys.one/en/http-proxy-list/", False),
-        ("https://spys.one/en/socks-proxy-list/", True),
-    ):
-        try:
-            async with session.post(
-                url,
-                data={"xpp": "3", "xf1": "0", "xf2": "0", "xf4": "0", "xf5": "0"},
-                headers=UA,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                html = await resp.text() if resp.status == 200 else ""
-        except Exception:
-            html = ""
-        if not html:
-            continue
-        socks_types = {}
-        if is_socks:
-            for m2 in re.finditer(
-                r"(\d{1,3}(?:\.\d{1,3}){3})[\s\S]{0,250}?<td colspan=1>(SOCKS[45])</td>",
-                html,
-            ):
-                socks_types[m2.group(1)] = m2.group(2)
-        for ip, port in decode_spys_ports(html):
-            proto = socks_types.get(ip, "SOCKS5") if is_socks else "HTTP"
-            rows.append({"address": "{}:{}".format(ip, port), "protocol": proto, "country": ""})
-    return rows
-
-
 # ---------------- proxynova.com (base64+chr obfuscated IPs) ----------------
 IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 NOVA_SCRIPT_RE = re.compile(r"document\.write\((atob\(.*?)\)\s*</script>", re.S)
@@ -493,35 +462,17 @@ async def scrape_aliilapro(session):
     return rows
 
 
-async def scrape_thespeedx(session):
-    rows = []
-    base = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master"
-    for proto, url in (
-        ("http.txt", "HTTP"),
-        ("socks4.txt", "SOCKS4"),
-        ("socks5.txt", "SOCKS5"),
-    ):
-        txt = await fetch(session, "{}/{}".format(base, proto))
-        for line in txt.splitlines():
-            m = ADDRESS_RE.search(line)
-            if m:
-                rows.append({"address": m.group(1), "protocol": url, "country": ""})
-    return rows
-
-
 SCRAPERS = (
     scrape_geonode,
     scrape_proxyscrape,
     scrape_fpl_sources,
     scrape_hidemy,
     scrape_proxydb,
-    scrape_spys_one,
     scrape_proxynova,
     scrape_dinoz0rg_checked,
     scrape_noctiro,
     scrape_dpangestuw,
     scrape_aliilapro,
-    scrape_thespeedx,
 )
 
 SOURCE_NAMES = {
@@ -530,13 +481,11 @@ SOURCE_NAMES = {
     scrape_fpl_sources: "FreeProxyLists + SSLProxies",
     scrape_hidemy: "Hidemy.name",
     scrape_proxydb: "ProxyDB",
-    scrape_spys_one: "Spys.one",
     scrape_proxynova: "ProxyNova",
     scrape_dinoz0rg_checked: "Dinoz0rg Checked Proxies",
     scrape_noctiro: "noctiro/getproxy",
     scrape_dpangestuw: "dpangestuw Free-Proxy",
     scrape_aliilapro: "ALIILAPRO/Proxy",
-    scrape_thespeedx: "TheSpeedX/PROXY-List",
 }
 
 
