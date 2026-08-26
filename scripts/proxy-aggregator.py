@@ -444,6 +444,55 @@ async def scrape_dinoz0rg_checked(session):
     return rows
 
 
+async def scrape_noctiro(session):
+    rows = []
+    base = "https://raw.githubusercontent.com/noctiro/getproxy/refs/heads/master/file"
+    for proto, url in (
+        ("http.txt", "HTTP"),
+        ("https.txt", "HTTPS"),
+        ("socks4.txt", "SOCKS4"),
+        ("socks5.txt", "SOCKS5"),
+    ):
+        txt = await fetch(session, "{}/{}".format(base, proto))
+        for line in txt.splitlines():
+            m = ADDRESS_RE.search(line)
+            if m:
+                rows.append({"address": m.group(1), "protocol": url, "country": ""})
+    return rows
+
+
+async def scrape_dpangestuw(session):
+    rows = []
+    base = "https://raw.githubusercontent.com/dpangestuw/Free-Proxy/refs/heads/main"
+    for proto, url in (
+        ("http_proxies.txt", "HTTP"),
+        ("socks4_proxies.txt", "SOCKS4"),
+        ("socks5_proxies.txt", "SOCKS5"),
+    ):
+        txt = await fetch(session, "{}/{}".format(base, proto))
+        for line in txt.splitlines():
+            m = ADDRESS_RE.search(line)
+            if m:
+                rows.append({"address": m.group(1), "protocol": url, "country": ""})
+    return rows
+
+
+async def scrape_thespeedx(session):
+    rows = []
+    base = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master"
+    for proto, url in (
+        ("http.txt", "HTTP"),
+        ("socks4.txt", "SOCKS4"),
+        ("socks5.txt", "SOCKS5"),
+    ):
+        txt = await fetch(session, "{}/{}".format(base, proto))
+        for line in txt.splitlines():
+            m = ADDRESS_RE.search(line)
+            if m:
+                rows.append({"address": m.group(1), "protocol": url, "country": ""})
+    return rows
+
+
 SCRAPERS = (
     scrape_geonode,
     scrape_proxyscrape,
@@ -453,6 +502,9 @@ SCRAPERS = (
     scrape_spys_one,
     scrape_proxynova,
     scrape_dinoz0rg_checked,
+    scrape_noctiro,
+    scrape_dpangestuw,
+    scrape_thespeedx,
 )
 
 SOURCE_NAMES = {
@@ -464,6 +516,9 @@ SOURCE_NAMES = {
     scrape_spys_one: "Spys.one",
     scrape_proxynova: "ProxyNova",
     scrape_dinoz0rg_checked: "Dinoz0rg Checked Proxies",
+    scrape_noctiro: "noctiro/getproxy",
+    scrape_dpangestuw: "dpangestuw Free-Proxy",
+    scrape_thespeedx: "TheSpeedX/PROXY-List",
 }
 
 
