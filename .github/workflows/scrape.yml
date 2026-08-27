@@ -23,7 +23,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install aiohttp beautifulsoup4
+        run: pip install aiohttp aiohttp-socks beautifulsoup4
 
       - name: Run aggregator
         run: python scripts/proxy-aggregator.py

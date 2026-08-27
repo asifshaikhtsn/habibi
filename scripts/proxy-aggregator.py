@@ -12,11 +12,60 @@ from bs4 import BeautifulSoup
 
 ROOT = Path(__file__).resolve().parent.parent
 COUNTRY_DIR = ROOT / "country"
+DATA_DIR = ROOT / "data"
+DEAD_FILE = DATA_DIR / "dead_proxies.json"
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
 
 ADDRESS_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3}:\d{1,5})")
 _TEXT_PROTOCOLS = ("HTTP", "HTTPS", "SOCKS4", "SOCKS5")
+CONCURRENCY = 100
+TIMEOUT = 10
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+try:
+    from aiohttp_socks import ProxyConnector
+    HAS_SOCKS = True
+except ImportError:
+    HAS_SOCKS = False
+    ProxyConnector = None
+
+
+def load_dead_set():
+    if DEAD_FILE.exists():
+        try:
+            return set(json.loads(DEAD_FILE.read_text(encoding="utf-8")).get("dead", []))
+        except Exception:
+            return set()
+    return set()
+
+
+def save_dead_set(dead_set):
+    DEAD_FILE.write_text(json.dumps({"dead": sorted(dead_set), "updated": time.time(), "count": len(dead_set)}, indent=2), encoding="utf-8")
+
+
+async def test_proxy(address, protocol, semaphore):
+    async with semaphore:
+        try:
+            timeout = aiohttp.ClientTimeout(total=TIMEOUT)
+            proto = protocol.upper()
+            if proto in ("SOCKS4", "SOCKS5") and HAS_SOCKS:
+                connector = ProxyConnector.from_url(f"{proto.lower()}://{address}")
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as s:
+                    async with s.get("http://httpbin.org/ip", timeout=timeout) as resp:
+                        if resp.status == 200:
+                            return True
+            else:
+                # HTTP/HTTPS -> use http:// proxy, socks without lib -> try http:// (will fail but not crash)
+                scheme = "http" if proto in ("HTTP", "HTTPS") else proto.lower()
+                proxy_url = f"{scheme}://{address}"
+                async with aiohttp.ClientSession(timeout=timeout) as s:
+                    async with s.get("http://httpbin.org/ip", proxy=proxy_url, timeout=timeout) as resp:
+                        if resp.status == 200:
+                            return True
+        except Exception:
+            pass
+    return False
 
 
 def _normalize_protocol(value):
@@ -506,6 +555,54 @@ async def main():
                     count += 1
             per_source[SOURCE_NAMES[scrape]] = count
 
+        # --- Validate: dead-first filter + working test (only alive goes to geolocate) ---
+        dead_set = load_dead_set()
+        print(f"[Validate] Loaded dead list: {len(dead_set)}")
+        initial = len(all_proxies)
+        filtered = [p for p in all_proxies if p["address"] not in dead_set]
+        print(f"[Validate] After dead filter: {initial} -> {len(filtered)} (removed {initial - len(filtered)})")
+        if filtered:
+            semaphore = asyncio.Semaphore(CONCURRENCY)
+            tasks_v = [test_proxy(p["address"], p["protocol"], semaphore) for p in filtered]
+            results_v = await asyncio.gather(*tasks_v)
+            working = [p for p, ok in zip(filtered, results_v) if ok]
+            dead_new = [p["address"] for p, ok in zip(filtered, results_v) if not ok]
+            print(f"[Validate] Working: {len(working)}, Dead new: {len(dead_new)}")
+            dead_set.update(dead_new)
+            save_dead_set(dead_set)
+            print(f"[Validate] Dead list total: {len(dead_set)}")
+            all_proxies = working
+        else:
+            print("[Validate] All proxies filtered by dead list")
+            save_dead_set(dead_set)
+            all_proxies = []
+
+        if not all_proxies:
+            print("[Validate] No working proxies, skipping geolocate and saving empty")
+            if COUNTRY_DIR.exists():
+                shutil.rmtree(COUNTRY_DIR)
+            COUNTRY_DIR.mkdir(parents=True, exist_ok=True)
+            summary = {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "sources": sorted(per_source),
+                "per_source": dict(sorted(per_source.items(), key=lambda x: -x[1])),
+                "total_scraped": initial,
+                "dead_filtered": initial - len(filtered) if 'filtered' in locals() else 0,
+                "validated": len(filtered) if 'filtered' in locals() else 0,
+                "working": 0,
+                "dead_new": len(dead_new) if 'dead_new' in locals() else 0,
+                "dead_total": len(dead_set),
+                "geolocated": 0,
+                "stored_count": 0,
+                "no_country_count": 0,
+                "country_count": 0,
+                "protocol_counts": {},
+                "country_counts": {},
+            }
+            (ROOT / "last_run.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            print(json.dumps(summary, indent=2))
+            return
+
         ips = list({p["address"].rsplit(":", 1)[0] for p in all_proxies})
         country_map = await geolocate_batch(session, ips)
         for p in all_proxies:
@@ -540,7 +637,11 @@ async def main():
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "sources": sorted(per_source),
             "per_source": dict(sorted(per_source.items(), key=lambda x: -x[1])),
-            "total_scraped": len(all_proxies),
+            "total_scraped": initial,
+            "validated": len(filtered),
+            "working": len(all_proxies),
+            "dead_new": len(dead_new),
+            "dead_total": len(dead_set),
             "geolocated": len(country_map),
             "stored_count": sum(len(addrs) for addrs in grouped.values()),
             "no_country_count": no_country_count,
