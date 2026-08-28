@@ -68,6 +68,31 @@ async def test_proxy(address, protocol, semaphore):
     return False
 
 
+def load_existing_working():
+    """Load previous working proxies from country/*/*.txt with their protocol/country"""
+    existing = []
+    if not COUNTRY_DIR.exists():
+        return existing
+    for cc_dir in COUNTRY_DIR.iterdir():
+        if not cc_dir.is_dir():
+            continue
+        cc = cc_dir.name.upper()
+        for proto_file in cc_dir.iterdir():
+            if not proto_file.is_file():
+                continue
+            proto = proto_file.stem.upper()
+            if proto not in _TEXT_PROTOCOLS:
+                continue
+            try:
+                for line in proto_file.read_text(encoding="utf-8").splitlines():
+                    m = ADDRESS_RE.search(line)
+                    if m:
+                        existing.append({"address": m.group(1), "protocol": proto, "country": cc})
+            except Exception:
+                continue
+    return existing
+
+
 def _normalize_protocol(value):
     value = str(value or "").strip().upper().replace("-", "").replace(" ", "")
     if value in ("SOCKS4|SOCKS5", "SOCKS5|SOCKS4"):
@@ -540,6 +565,30 @@ SOURCE_NAMES = {
 
 async def main():
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        # --- Persistent working: re-validate previous working before new scrape ---
+        dead_set = load_dead_set()
+        existing = load_existing_working()
+        print(f"[Persistent] Loaded existing working: {len(existing)}, dead: {len(dead_set)}")
+        still_working = []
+        if existing:
+            # filter existing that may have become dead since last run (dead list updated)
+            existing_filtered = [p for p in existing if p["address"] not in dead_set]
+            print(f"[Persistent] Existing after dead filter: {len(existing)} -> {len(existing_filtered)}")
+            if existing_filtered:
+                semaphore0 = asyncio.Semaphore(CONCURRENCY)
+                tasks0 = [test_proxy(p["address"], p["protocol"], semaphore0) for p in existing_filtered]
+                results0 = await asyncio.gather(*tasks0)
+                still_working = [p for p, ok in zip(existing_filtered, results0) if ok]
+                dead_existing = [p["address"] for p, ok in zip(existing_filtered, results0) if not ok]
+                print(f"[Persistent] Still working: {len(still_working)}, Dead from old: {len(dead_existing)}")
+                if dead_existing:
+                    dead_set.update(dead_existing)
+                    save_dead_set(dead_set)
+            else:
+                print("[Persistent] All existing already in dead list")
+        else:
+            print("[Persistent] No existing working to re-validate")
+
         per_source = {}
         tasks = [scrape(session) for scrape in SCRAPERS]
         results = await asyncio.gather(*tasks)
@@ -555,27 +604,30 @@ async def main():
                     count += 1
             per_source[SOURCE_NAMES[scrape]] = count
 
-        # --- Validate: dead-first filter + working test (only alive goes to geolocate) ---
-        dead_set = load_dead_set()
-        print(f"[Validate] Loaded dead list: {len(dead_set)}")
+        # --- Validate new scraped: dead + still_working dedup -> working_new ---
         initial = len(all_proxies)
-        filtered = [p for p in all_proxies if p["address"] not in dead_set]
-        print(f"[Validate] After dead filter: {initial} -> {len(filtered)} (removed {initial - len(filtered)})")
+        still_addrs = {p["address"] for p in still_working}
+        filtered = [p for p in all_proxies if p["address"] not in dead_set and p["address"] not in still_addrs]
+        print(f"[Validate] New after dead+still_working filter: {initial} -> {len(filtered)} (removed {initial - len(filtered)})")
+        working_new = []
+        dead_new = []
         if filtered:
             semaphore = asyncio.Semaphore(CONCURRENCY)
             tasks_v = [test_proxy(p["address"], p["protocol"], semaphore) for p in filtered]
             results_v = await asyncio.gather(*tasks_v)
-            working = [p for p, ok in zip(filtered, results_v) if ok]
+            working_new = [p for p, ok in zip(filtered, results_v) if ok]
             dead_new = [p["address"] for p, ok in zip(filtered, results_v) if not ok]
-            print(f"[Validate] Working: {len(working)}, Dead new: {len(dead_new)}")
-            dead_set.update(dead_new)
-            save_dead_set(dead_set)
+            print(f"[Validate] New Working: {len(working_new)}, Dead new: {len(dead_new)}")
+            if dead_new:
+                dead_set.update(dead_new)
+                save_dead_set(dead_set)
             print(f"[Validate] Dead list total: {len(dead_set)}")
-            all_proxies = working
         else:
-            print("[Validate] All proxies filtered by dead list")
-            save_dead_set(dead_set)
-            all_proxies = []
+            print("[Validate] No new proxies to validate")
+
+        # Merge still working + new working (dedup already)
+        all_proxies = still_working + working_new
+        print(f"[Merge] Total working to keep: {len(all_proxies)} (still {len(still_working)} + new {len(working_new)})")
 
         if not all_proxies:
             print("[Validate] No working proxies, skipping geolocate and saving empty")
@@ -603,12 +655,18 @@ async def main():
             print(json.dumps(summary, indent=2))
             return
 
-        ips = list({p["address"].rsplit(":", 1)[0] for p in all_proxies})
-        country_map = await geolocate_batch(session, ips)
-        for p in all_proxies:
-            cc = country_map.get(p["address"].rsplit(":", 1)[0])
-            if cc:
-                p["country"] = cc
+        # Only geolocate new working (still_working already has country)
+        if working_new:
+            ips_new = list({p["address"].rsplit(":", 1)[0] for p in working_new})
+            country_map_new = await geolocate_batch(session, ips_new)
+            for p in working_new:
+                cc = country_map_new.get(p["address"].rsplit(":", 1)[0])
+                if cc:
+                    p["country"] = cc
+            print(f"[Geolocate] New working geolocated: {len(country_map_new)} / {len(working_new)}")
+            # still_working keeps its existing country as-is
+        else:
+            print("[Geolocate] No new working to geolocate, keeping still_working as-is")
 
         grouped = defaultdict(set)
         protocol_counts = defaultdict(int)
@@ -639,10 +697,12 @@ async def main():
             "per_source": dict(sorted(per_source.items(), key=lambda x: -x[1])),
             "total_scraped": initial,
             "validated": len(filtered),
+            "still_working": len(still_working),
+            "working_new": len(working_new),
             "working": len(all_proxies),
             "dead_new": len(dead_new),
             "dead_total": len(dead_set),
-            "geolocated": len(country_map),
+            "geolocated": len(all_proxies) - no_country_count,
             "stored_count": sum(len(addrs) for addrs in grouped.values()),
             "no_country_count": no_country_count,
             "country_count": len(country_counts),
