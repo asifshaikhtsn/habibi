@@ -19,8 +19,8 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 
 ADDRESS_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3}:\d{1,5})")
 _TEXT_PROTOCOLS = ("HTTP", "HTTPS", "SOCKS4", "SOCKS5")
-CONCURRENCY = 100
-TIMEOUT = 10
+CONCURRENCY = 150
+TIMEOUT = 15
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 try:
@@ -46,25 +46,32 @@ def save_dead_set(dead_set):
 
 async def test_proxy(address, protocol, semaphore):
     async with semaphore:
-        try:
-            timeout = aiohttp.ClientTimeout(total=TIMEOUT)
-            proto = protocol.upper()
-            if proto in ("SOCKS4", "SOCKS5") and HAS_SOCKS:
-                connector = ProxyConnector.from_url(f"{proto.lower()}://{address}")
-                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as s:
-                    async with s.get("http://httpbin.org/ip", timeout=timeout) as resp:
-                        if resp.status == 200:
-                            return True
-            else:
-                # HTTP/HTTPS -> use http:// proxy, socks without lib -> try http:// (will fail but not crash)
-                scheme = "http" if proto in ("HTTP", "HTTPS") else proto.lower()
-                proxy_url = f"{scheme}://{address}"
-                async with aiohttp.ClientSession(timeout=timeout) as s:
-                    async with s.get("http://httpbin.org/ip", proxy=proxy_url, timeout=timeout) as resp:
-                        if resp.status == 200:
-                            return True
-        except Exception:
-            pass
+        for attempt in range(2):
+            try:
+                timeout = aiohttp.ClientTimeout(total=TIMEOUT)
+                proto = protocol.upper()
+                # Try httpbin first, fallback to ip-api for leniency
+                test_urls = ["http://httpbin.org/ip", "http://ip-api.com/json"]
+                for test_url in test_urls:
+                    try:
+                        if proto in ("SOCKS4", "SOCKS5") and HAS_SOCKS:
+                            connector = ProxyConnector.from_url(f"{proto.lower()}://{address}")
+                            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as s:
+                                async with s.get(test_url, timeout=timeout) as resp:
+                                    if resp.status == 200:
+                                        return True
+                        else:
+                            scheme = "http" if proto in ("HTTP", "HTTPS") else proto.lower()
+                            proxy_url = f"{scheme}://{address}"
+                            async with aiohttp.ClientSession(timeout=timeout) as s:
+                                async with s.get(test_url, proxy=proxy_url, timeout=timeout) as resp:
+                                    if resp.status == 200:
+                                        return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            await asyncio.sleep(0.2 * (attempt + 1))
     return False
 
 
