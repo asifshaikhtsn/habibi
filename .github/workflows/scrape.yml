@@ -2,7 +2,7 @@ name: Scrape & Filter Proxies
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "17,47 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -12,7 +12,7 @@ on:
 
 concurrency:
   group: habibi-proxy-scrape
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
