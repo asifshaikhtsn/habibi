@@ -64,7 +64,7 @@ jobs:
           for i in {1..3}; do
             git add -A
             git diff --cached --quiet || git commit -m "Update proxy lists smart v2.2 [skip ci]"
-            git pull --rebase --autostash origin main && git push && break
+            git pull --rebase --autostash origin main && git push && exit 0
             echo "Push failed (attempt $i/3), retrying in 10s..."
             sleep 10
           done
