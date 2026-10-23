@@ -45,9 +45,9 @@ jobs:
 
       - name: Fetch shared smart proxy engine
         run: |
-          curl -fsSL https://raw.githubusercontent.com/asifshaikhtsn/Walla/1d01ab0ccae3901aa6c019b3a305679d852614f2/geo_country.py -o geo_country.py
-          curl -fsSL https://raw.githubusercontent.com/asifshaikhtsn/Walla/1d01ab0ccae3901aa6c019b3a305679d852614f2/geo_runner.py -o geo_runner.py
-          curl -fsSL https://raw.githubusercontent.com/asifshaikhtsn/Walla/1d01ab0ccae3901aa6c019b3a305679d852614f2/pool_runner_v22.py -o pool_runner_v22.py
+          curl -fsSL https://raw.githubusercontent.com/asifshaikhtsn/Walla/58cfef29e2a0efeb2de9941e425df4580db64973/geo_country.py -o geo_country.py
+          curl -fsSL https://raw.githubusercontent.com/asifshaikhtsn/Walla/58cfef29e2a0efeb2de9941e425df4580db64973/geo_runner.py -o geo_runner.py
+          curl -fsSL https://raw.githubusercontent.com/asifshaikhtsn/Walla/58cfef29e2a0efeb2de9941e425df4580db64973/pool_runner_v22.py -o pool_runner_v22.py
 
       - name: Run Habibi smart v2.2 pool
         env:
