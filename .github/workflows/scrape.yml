@@ -68,3 +68,5 @@ jobs:
             echo "Push failed (attempt $i/3), retrying in 10s..."
             sleep 10
           done
+          echo "::error::Failed to push generated proxy outputs after 3 attempts"
+          exit 1
